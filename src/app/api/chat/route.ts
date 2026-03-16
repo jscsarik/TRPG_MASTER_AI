@@ -3,6 +3,8 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 import fs from "fs";
 import path from "path";
 
+export const maxDuration = 60; // Set timeout to 60 seconds (for Vercel Hobby/Pro plan compatibility)
+
 // NOTE: in production you may want to use a singleton or memory cache if documents are very large.
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
 const MODEL_NAME = "gemini-2.5-flash";
