@@ -3,11 +3,11 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 import fs from "fs";
 import path from "path";
 
-export const maxDuration = 60; // Set timeout to 60 seconds (for Vercel Hobby/Pro plan compatibility)
+// Local setup: Removing Vercel-specific maxDuration
 
 // NOTE: in production you may want to use a singleton or memory cache if documents are very large.
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
-const MODEL_NAME = "gemini-2.5-flash";
+const MODEL_NAME = "gemini-2.5-flash-lite";
 
 // Global cache for knowledge and image list to prevent slow disk reads and PDF parsing on each request
 let cachedKnowledgeData: string | null = null;
@@ -112,15 +112,12 @@ export async function POST(req: NextRequest) {
       model: MODEL_NAME,
       systemInstruction,
       generationConfig: {
-        temperature: 0.6,
-        topP: 0.9,
+        temperature: 0.7, // Slightly higher for more creative D&D responses
+        topP: 0.95,
       }
     });
 
-    // Remove the first auto-generated message if it breaks alternating user/model pattern (usually Gemini requires history to start with 'user')
-    // Wait, if we keep the model message, we should prepend a dummy user message, or just strip the initial welcome from history since the system instructions provide context.
     const filteredHistory = history.filter((msg: any, idx: number) => {
-      // Typically, ignore the very first hardcoded 'model' welcome message to avoid 'first message should be user' error
       if (idx === 0 && msg.role === 'model' && msg.content.includes("어둠이 짙게 깔린")) return false;
       return true;
     }).map((msg: any) => ({
@@ -128,22 +125,44 @@ export async function POST(req: NextRequest) {
       parts: [{ text: msg.content }],
     }));
 
-    // Start chat with prepared history (which might be empty if it's the first real question)
     const chatSession = model.startChat({
       history: filteredHistory
     });
 
-    const result = await chatSession.sendMessage(message);
-    const responseText = result.response.text();
+    // Use streaming for better local performance and responsiveness
+    const result = await chatSession.sendMessageStream(message);
+    
+    // Create a ReadableStream to pipe to the response
+    const stream = new ReadableStream({
+      async start(controller) {
+        const encoder = new TextEncoder();
+        try {
+          for await (const chunk of result.stream) {
+            const chunkText = chunk.text();
+            if (chunkText) {
+              controller.enqueue(encoder.encode(chunkText));
+            }
+          }
+          controller.close();
+        } catch (err) {
+          controller.error(err);
+        }
+      },
+    });
 
-    return NextResponse.json({ response: responseText });
+    return new Response(stream, {
+      headers: {
+        "Content-Type": "text/plain; charset=utf-8",
+        "Cache-Control": "no-cache",
+      },
+    });
+
   } catch (error: any) {
     console.error("Gemini API error:", error);
     let errorMessage = error.message || "알 수 없는 시스템 오류가 발생했습니다.";
     
-    // 429 에러(무료 할당량 초과) 발생 시 알기 쉬운 에러 메시지 반환
     if (errorMessage.includes("429") || errorMessage.includes("Quota exceeded") || errorMessage.includes("Too Many Requests")) {
-      errorMessage = "Google Gemini API 무료 요금제 한도점(1분당 요청 횟수)에 도달했습니다. 마스터가 주사위를 정비하는 중이니 약 1분 뒤에 다시 말을 걸어주세요! (Vercel 배포 후 Google AI Studio 콘솔에서 결제 카드를 등록하셔야 연속적인 플레이가 가능합니다)";
+      errorMessage = "Google Gemini API 무료 요금제 한도(1분당 요청 횟수)에 도달했습니다. 잠시 후(약 10~30초) 다시 시도해 주세요. 로컬 실행 중이므로 Vercel보다 여유롭지만, 연속적인 요청이 너무 많으면 제한될 수 있습니다.";
     }
     
     return NextResponse.json({ error: errorMessage }, { status: 500 });

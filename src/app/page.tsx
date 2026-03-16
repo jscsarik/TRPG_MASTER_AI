@@ -58,13 +58,31 @@ export default function ChatPage() {
         }),
       });
 
-      const data = await response.json();
-      
       if (!response.ok) {
-        throw new Error(data.error || "알 수 없는 에러가 발생했습니다.");
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || "알 수 없는 에러가 발생했습니다.");
       }
 
-      setMessages([...newMessages, { role: "model", content: data.response }]);
+      // Handle streaming response
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error("스트림을 읽을 수 없습니다.");
+
+      let accumulatedResponse = "";
+      const textDecoder = new TextDecoder();
+      
+      // Add an initial empty message for the model
+      setMessages([...newMessages, { role: "model", content: "" }]);
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = textDecoder.decode(value, { stream: true });
+        accumulatedResponse += chunk;
+
+        // Update the last message (the model's response) with the accumulated text
+        setMessages([...newMessages, { role: "model", content: accumulatedResponse }]);
+      }
     } catch (error: any) {
       setMessages([
         ...newMessages,
