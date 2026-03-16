@@ -137,6 +137,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ response: responseText });
   } catch (error: any) {
     console.error("Gemini API error:", error);
-    return NextResponse.json({ error: error.message || "Failed to generate response" }, { status: 500 });
+    let errorMessage = error.message || "알 수 없는 시스템 오류가 발생했습니다.";
+    
+    // 429 에러(무료 할당량 초과) 발생 시 알기 쉬운 에러 메시지 반환
+    if (errorMessage.includes("429") || errorMessage.includes("Quota exceeded") || errorMessage.includes("Too Many Requests")) {
+      errorMessage = "Google Gemini API 무료 요금제 한도점(1분당 요청 횟수)에 도달했습니다. 마스터가 주사위를 정비하는 중이니 약 1분 뒤에 다시 말을 걸어주세요! (Vercel 배포 후 Google AI Studio 콘솔에서 결제 카드를 등록하셔야 연속적인 플레이가 가능합니다)";
+    }
+    
+    return NextResponse.json({ error: errorMessage }, { status: 500 });
   }
 }
