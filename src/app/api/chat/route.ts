@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import fs from "fs";
 import path from "path";
-import { PDFParse } from "pdf-parse";
 
 // NOTE: in production you may want to use a singleton or memory cache if documents are very large.
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
@@ -24,20 +23,14 @@ async function readKnowledgeBase(): Promise<string> {
     return cachedKnowledgeData;
   }
 
-  const files = fs.readdirSync(dataDir);
+  const files = await fs.promises.readdir(dataDir);
   
   for (const file of files) {
     const filePath = path.join(dataDir, file);
     try {
       if (file.endsWith(".txt")) {
-        const textContent = fs.readFileSync(filePath, "utf-8");
+        const textContent = await fs.promises.readFile(filePath, "utf-8");
         knowledge += `\n--- 파일: ${file} (커스텀 시나리오 룰) ---\n${textContent}\n`;
-      } else if (file.endsWith(".pdf")) {
-        const dataBuffer = fs.readFileSync(filePath);
-        // User pdf-parse v2 class API to avoid Turbopack default export/canvas evaluation issues
-        const parser = new PDFParse({ data: dataBuffer });
-        const pdfData = await parser.getText();
-        knowledge += `\n--- 파일: ${file} (D&D 5판 기본 룰북) ---\n${pdfData.text}\n`;
       }
     } catch (e) {
       console.error(`Error reading ${file}:`, e);
@@ -77,9 +70,9 @@ async function buildSystemPrompt() {
   const knowledgeData = await readKnowledgeBase();
   const imageList = readPublicImages();
 
-  return `당신은 D&D 5판(5e) 룰을 완벽하게 꿰뚫고 있는 베테랑 던전 마스터야. 제공된 PDF 문서뿐만 아니라, 네가 이미 학습해서 알고 있는 방대한 D&D 5판 공식 룰 지식을 적극적으로 끌어와서 대답해.
+  return `당신은 D&D 5판(5e) 룰을 완벽하게 꿰뚫고 있는 베테랑 던전 마스터야. 제공된 시나리오 텍스트 문서뿐만 아니라, 네가 이미 학습해서 알고 있는 방대한 D&D 5판 공식 룰 지식을 적극적으로 끌어와서 대답해.
   
-특히 한국어 TRPG 용어(예: 고양감 = Inspiration, 내성 굴림 = Saving Throw, AC = 방어도, 히트 다이스 = Hit Dice 등)를 영어 원본 룰과 완벽하게 매칭해서 이해해. 플레이어가 캐릭터 시트에 있는 단어를 물어보면 무조건 D&D 5판 룰(dnd_5e_basic_rules.pdf 포함)에 입각해서 상세하고 전문적으로 설명해 줘.
+특히 한국어 TRPG 용어(예: 고양감 = Inspiration, 내성 굴림 = Saving Throw, AC = 방어도, 히트 다이스 = Hit Dice 등)를 영어 원본 룰과 완벽하게 매칭해서 이해해. 플레이어가 캐릭터 시트에 있는 단어를 물어보면 무조건 D&D 5판 룰에 입각해서 상세하고 전문적으로 설명해 줘.
   
 다크 판타지 요소가 가미된 중세 시대, 고딕 양식 등을 배경으로 하며, 몰입감 있는 TRPG 게임 마스터의 말투(위엄 있고 때론 조력자 같으나 단호한 어조)를 사용해야 한다.
   
@@ -87,8 +80,8 @@ async function buildSystemPrompt() {
 1. 사용자의 입력 문맥을 분석하여 지식 기반 내의 3개 시나리오 중 '현재 플레이 중인 시나리오'가 무엇인지 특정하고 해당 시나리오 설정 안에서만 답변하라.
 2. 규칙 적용 우선순위:
    - 1순위: 현재 시나리오의 커스텀 .txt 파일 룰 (로컬 커스텀 시나리오 텍스트 파일과 규칙이 충돌할 때는 언제나 이 커스텀 룰이 최우선이야!)
-   - 2순위: D&D 5e 공식 .pdf 파일 룰북 (dnd_5e_basic_rules.pdf) 및 당신의 기존 D&D 5e 지식
-3. 만약 공식 룰북과 커스텀 파일의 룰이 충돌한다면, **공식 룰북을 완전히 무시하고 커스텀 파일의 룰을 무조건 우선 적용**하라.
+   - 2순위: D&D 5e 공식 룰 및 당신의 기존 D&D 5e 지식
+3. 만약 공식 룰과 커스텀 파일의 룰이 충돌한다면, **공식 지식을 완전히 무시하고 커스텀 파일의 룰을 무조건 우선 적용**하라.
 4. **절대 환각(할루시네이션)을 일으키지 마라.** 시나리오 설정상 존재하지 않는 룰, 장소, NPC 등을 임의로 지어내지 마라.
 5. 질문이 룰의 범위를 벗어나는 게임 내 행동 선언이라면, 마스터로서 주사위 굴림(예: 1d20 힘 판정)을 요구하거나 상황을 묘사해주어라.
 
